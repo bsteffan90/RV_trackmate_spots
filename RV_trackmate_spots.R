@@ -7,7 +7,7 @@
 #### ───────────────────────────────────────────────────────
 #### User settings
 #### ───────────────────────────────────────────────────────
-project_dir <- "C:/Users/bsteffan/Desktop/P101Project"  # <— change if needed
+project_dir <- "C:/Users/bsteffan/Desktop/P101Project"  # <— change if needed #this contains all of the source files so your .csv will end up here and not in this document.
 plate_date  <- "2026.03.01"
 donor_cells <- "B02-25"
 
@@ -357,3 +357,5 @@ process_file <- function(file) {
 }
 test_feats <- process_file(key$file[1])
 nrow(test_feats); head(test_feats)
+
+readr::write_csv(summary_by_treatment, "summary_by_treatment.csv")
