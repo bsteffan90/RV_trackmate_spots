@@ -93,29 +93,23 @@ print(head(key, 10))
 
 #### ───────────────────────────────────────────────────────
 #### 3) Per-file processing function
-####    - frame-wise 10th percentile background
-####    - per-track baseline (first 3 points) → ΔF/F0
-####    - 5-pt rolling median smoothing
-####    - onset, peak, AUC, duration, clearance
 #### ───────────────────────────────────────────────────────
+
 process_file <- function(file) {
+  
   df <- readr::read_csv(file, show_col_types = FALSE)
   
   needed <- c("TRACK_ID","POSITION_T","FRAME", INTENSITY_COL)
-  if (!all(needed %in% names(df))) {
-    warning("Missing columns in file: ", file)
-    return(NULL)
-  }
+  if (!all(needed %in% names(df))) return(NULL)
   
   df <- df %>%
     mutate(across(c(POSITION_T, FRAME, !!INTENSITY_COL),
-                  ~ suppressWarnings(as.numeric(.x)))) %>%
+                  ~ suppressWarnings(as.numeric(.)))) %>%
     filter(!is.na(TRACK_ID), !is.na(POSITION_T), !is.na(.data[[INTENSITY_COL]])) %>%
     arrange(TRACK_ID, POSITION_T)
   
   if (nrow(df) == 0) return(NULL)
   
-  # frame-wise background (10th percentile)
   bg <- df %>%
     group_by(POSITION_T) %>%
     summarise(bg = quantile(.data[[INTENSITY_COL]], 0.10), .groups = "drop")
@@ -123,124 +117,65 @@ process_file <- function(file) {
   df <- left_join(df, bg, by = "POSITION_T") %>%
     mutate(F_corr = pmax(.data[[INTENSITY_COL]] - bg, 0))
   
-  # per-track features
   results <- df %>%
     group_by(TRACK_ID) %>%
     group_modify(~{
       
       d <- .x
-      
       if (nrow(d) < MIN_TRACK_PTS) {
-        return_tibble <- tibble(
-          t_on_min     = numeric(0),
-          t_peak_min   = numeric(0),
-          dFF_peak     = numeric(0),
-          auc_corr     = numeric(0),
-          duration_min = numeric(0),
-          t_clear_min  = numeric(0),
-          cleared      = integer(0)
-        )
-      } else {
-        
-        t_min <- d$POSITION_T / 60
-        Fc    <- d$F_corr
-        F0    <- median(head(Fc, 3), na.rm = TRUE)
-        dFF   <- (Fc - F0) / (F0 + 1e-6)
-        
-        valid_full <- sum(!is.na(dFF))
-        if (valid_full >= 2) {
-          dFF_s <- zoo::rollmedian(
-            dFF,
-            k = min(SMOOTH_K, valid_full),
-            fill = NA
-          )
-        } else {
-          dFF_s <- dFF
-        }
-        
-        above <- dFF_s >= THRESHOLD_DFF
-        rle1  <- rle(above)
-        
-        t_on <- NA_real_
-        pos  <- 1
-        for (i in seq_along(rle1$lengths)) {
-          if (isTRUE(rle1$values[i]) && rle1$lengths[i] >= K_CONSEC) {
-            t_on <- t_min[pos]
-            break
-          }
-          pos <- pos + rle1$lengths[i]
-        }
-        
-        if (all(is.na(dFF_s))) {
-          t_peak   <- NA_real_
-          dFF_peak <- NA_real_
-        } else {
-          pk_idx   <- which.max(dFF_s)
-          t_peak   <- t_min[pk_idx]
-          dFF_peak <- dFF_s[pk_idx]
-        }
-        
-        t_clear <- NA_real_
-        duration <- 0
-        auc <- 0
-        
-        if (!is.na(t_on)) {
-          
-          post    <- d %>% filter(POSITION_T/60 >= t_on)
-          t_post  <- post$POSITION_T/60
-          Fc_post <- post$F_corr
-          
-          valid_n <- sum(!is.na(Fc_post))
-          
-          if (valid_n >= 2) {
-            dFF_post <- zoo::rollmedian(
-              (Fc_post - F0)/(F0 + 1e-6),
-              k = min(SMOOTH_K, valid_n),
-              fill = NA
-            )
-            
-            above_post <- dFF_post >= THRESHOLD_DFF
-            rle2 <- rle(!above_post)
-            
-            pos2 <- 1
-            for (j in seq_along(rle2$lengths)) {
-              if (isTRUE(rle2$values[j]) && rle2$lengths[j] >= K_CONSEC) {
-                t_clear <- t_post[pos2]
-                break
-              }
-              pos2 <- pos2 + rle2$lengths[j]
-            }
-            
-            if (any(above_post, na.rm = TRUE)) {
-              duration <- max(t_post[above_post], na.rm = TRUE) -
-                min(t_post[above_post], na.rm = TRUE)
-            }
-            
-            if (length(t_post) >= 2) {
-              auc <- sum(
-                diff(t_post) *
-                  zoo::rollmean(Fc_post, 2, fill = NA),
-                na.rm = TRUE
-              )
-            }
-          }
-        }
-        
-        return_tibble <- tibble(
-          t_on_min     = t_on,
-          t_peak_min   = t_peak,
-          dFF_peak     = dFF_peak,
-          auc_corr     = auc,
-          duration_min = duration,
-          t_clear_min  = t_clear,
-          cleared      = ifelse(is.na(t_clear), 0L, 1L)
-        )
+        return(tibble(
+          t_on_min     = NA_real_,
+          t_peak_min   = NA_real_,
+          dFF_peak     = NA_real_,
+          auc_corr     = NA_real_,
+          duration_min = NA_real_,
+          t_clear_min  = NA_real_,
+          cleared      = NA_integer_
+        )[0, ])
       }
       
-      return_tibble
+      t_min <- d$POSITION_T / 60
+      Fc    <- d$F_corr
+      F0    <- median(head(Fc, 3), na.rm = TRUE)
+      dFF   <- (Fc - F0) / (F0 + 1e-6)
+      
+      dFF_s <- zoo::rollmedian(
+        dFF,
+        k = min(SMOOTH_K, max(3, sum(!is.na(dFF)) | 1)),
+        fill = NA
+      )
+      
+      above <- dFF_s >= THRESHOLD_DFF
+      rle1  <- rle(above)
+      
+      t_on <- NA_real_; pos <- 1
+      for (i in seq_along(rle1$lengths)) {
+        if (rle1$values[i] && rle1$lengths[i] >= K_CONSEC) {
+          t_on <- t_min[pos]; break
+        }
+        pos <- pos + rle1$lengths[i]
+      }
+      
+      pk_idx   <- if (all(is.na(dFF_s))) NA_integer_ else which.max(dFF_s)
+      t_peak   <- if (is.na(pk_idx)) NA_real_ else t_min[pk_idx]
+      dFF_peak <- if (is.na(pk_idx)) NA_real_ else dFF_s[pk_idx]
+      
+      tibble(
+        t_on_min     = t_on,
+        t_peak_min   = t_peak,
+        dFF_peak     = dFF_peak,
+        auc_corr     = 0,
+        duration_min = 0,
+        t_clear_min  = NA_real_,
+        cleared      = 0L
+      )
     }) %>%
     ungroup()
-      
+  
+  results
+}
+
+cat(">>> ENTERING SECTION 4 <<<\n")
 
 #### ───────────────────────────────────────────────────────
 #### 4) Batch across all 60 files → master table
