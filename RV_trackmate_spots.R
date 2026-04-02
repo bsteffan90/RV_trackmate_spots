@@ -109,8 +109,14 @@ process_file <- function(file) {
   
   df <- readr::read_csv(file, show_col_types = FALSE)
   
+  message("  Raw rows: ", nrow(df))
+  message("  Columns: ", paste(names(df), collapse = ", "))
+  
   needed <- c("TRACK_ID","POSITION_T","FRAME", INTENSITY_COL)
-  if (!all(needed %in% names(df))) return(NULL)
+  if (!all(needed %in% names(df))) {
+    message("  Missing columns!")
+    return(NULL)
+  }
   
   df <- df %>%
     mutate(across(c(POSITION_T, FRAME, !!INTENSITY_COL),
@@ -127,7 +133,9 @@ process_file <- function(file) {
   df <- left_join(df, bg, by = "POSITION_T") %>%
     mutate(F_corr = pmax(.data[[INTENSITY_COL]] - bg, 0))
   
-  results <- df %>%
+  message("  After processing: ", nrow(df), " rows, ", n_distinct(df$TRACK_ID), " tracks")
+  
+   results <- df %>%
     group_by(TRACK_ID) %>%
     group_modify(~{
       
@@ -141,7 +149,7 @@ process_file <- function(file) {
           duration_min = NA_real_,
           t_clear_min  = NA_real_,
           cleared      = NA_integer_
-        )[0, ])
+        ))
       }
       
       t_min <- d$POSITION_T / 60
@@ -151,7 +159,7 @@ process_file <- function(file) {
       
       dFF_s <- zoo::rollmedian(
         dFF,
-        k = min(SMOOTH_K, max(3, sum(!is.na(dFF)) | 1)),
+        k = min(SMOOTH_K, max(3, sum(!is.na(dFF)) || 1)),
         fill = NA
       )
       
@@ -176,14 +184,16 @@ process_file <- function(file) {
         Fc_post <- post$F_corr
         
         dFF_post_raw <- (Fc_post - F0)/(F0 + 1e-6)
-        dFF_post     <- zoo::rollmedian(
+        dFF_post <- zoo::rollmedian(
           dFF_post_raw,
-          k = min(SMOOTH_K, length(dFF_post_raw)),
+          k = min(SMOOTH_K, max(3, sum(!is.na(dFF_post_raw)) || 1)),
           fill = NA
         )
         
         above_post <- dFF_post >= THRESHOLD_DFF
-        above_post[is.na(above_post)] <- FALSE
+        if (length(above_post) > 0) {
+          above_post[is.na(above_post)] <- FALSE
+        }
         
         duration <- if (any(above_post)) {
           max(t_post[above_post]) - min(t_post[above_post])
@@ -221,29 +231,42 @@ cat(">>> ENTERING SECTION 4 <<<\n")
 #### 4) Batch across all 60 files → master table
 #### ───────────────────────────────────────────────────────
 
-all_tracks_list <- purrr::map2(
-  key$file,
-  seq_len(nrow(key)),
-  ~{
-    message("Processing: ", .x)
-    
-    feats <- process_file(.x)
-    
-    if (!is.null(feats) && nrow(feats) > 0) {
-      dplyr::bind_cols(
-        feats,
-        key[.y, c(
-          "file", "treatment", "well", "cells",
-          "plate_date", "field_idx", "bio_rep", "tech_rep"
-        )]
-      )
-    } else {
-      NULL   # safe here
-    }
+all_tracks_list <- lapply(seq_len(nrow(key)), function(i) {
+  
+  message("Processing: ", key$file[i])
+  
+  feats <- process_file(key$file[i])
+  
+  # ✅ Debug: check what we got
+  if (is.null(feats)) {
+    message("  → NULL result")
+    return(NULL)
   }
-)
+  
+  message("  → nrow(feats) = ", nrow(feats))
+  
+  if (nrow(feats) == 0) {
+    message("  → Empty result, skipping")
+    return(NULL)
+  }
+  
+  feats <- as.data.frame(feats)
+  
+  # ✅ Extract 1-row metadata
+  meta <- key[i, c(
+    "file", "treatment", "well", "cells",
+    "plate_date", "field_idx", "bio_rep", "tech_rep"
+  )]
+  
+  # ✅ Replicate metadata to EXACTLY nrow(feats)
+  meta_rep <- meta[rep(1, nrow(feats)), , drop = FALSE]
+  
+  # ✅ Column-bind compatible objects
+  cbind(feats, meta_rep)
+})
 
 all_tracks <- dplyr::bind_rows(all_tracks_list)
+
 
 #### ───────────────────────────────────────────────────────
 #### 5) Quick summaries (sanity check)
