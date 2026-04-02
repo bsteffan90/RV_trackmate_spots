@@ -1,5 +1,5 @@
 ############################################################
-# P101 Infection Dynamics - FULL R-ONLY PIPELINE (FINAL)
+# Infection Dynamics - FULL R-ONLY PIPELINE (FINAL)
 # Processes all TrackMate "spots" CSVs directly in R
 # Output: track_features_master.csv + summary_by_treatment.csv
 ############################################################
