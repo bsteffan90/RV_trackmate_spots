@@ -7,9 +7,8 @@
 #### ───────────────────────────────────────────────────────
 #### User settings
 #### ───────────────────────────────────────────────────────
-project_dir <- "C:/Users/bsteffan/Desktop/P100Project"  # <— change if needed #this contains all of the source files so your .csv will end up here and not in this document.
-plate_date  <- "2026.02.27"
-donor_cells <- "B02-25"
+project_dir <- "C:/Users/bsteffan/Desktop/P103Project"  # <— change if needed #this contains all of the source files so your .csv will end up here and not in this document.
+donor_cells <- "B10-25"
 
 # Analysis parameters
 INTENSITY_COL <- "MEAN_INTENSITY_CH1"  # set to "TOTAL_INTENSITY_CH1" if desired
@@ -33,7 +32,7 @@ suppressPackageStartupMessages({
 #### ───────────────────────────────────────────────────────
 #### 0) Start clean & set working directory
 #### ───────────────────────────────────────────────────────
-rm(list = setdiff(ls(), c("project_dir","plate_date","donor_cells",
+rm(list = setdiff(ls(), c("project_dir","donor_cells",
                           "INTENSITY_COL","THRESHOLD_DFF","K_CONSEC",
                           "SMOOTH_K","MIN_TRACK_PTS")))
 gc()
@@ -43,7 +42,15 @@ cat("Working dir:", getwd(), "\n")
 #### ───────────────────────────────────────────────────────
 #### 1) Locate files and derive series number (1..60)
 #### ───────────────────────────────────────────────────────
-files <- list.files(pattern = "p100-2026\\.02\\.27_spots_series\\d+\\.csv")
+# Find all p103 spots files
+all_p103 <- list.files(pattern = "[Pp]103-.*_spots_series\\d+\\.csv")
+
+# Extract date from first filename
+date_match <- stringr::str_extract(all_p103[1], "(?<=p103-).*(?=_spots)")
+plate_date <- date_match
+
+# Now get files for this date
+files <- list.files(pattern = paste0("[Pp]103-", plate_date, "_spots_series\\d+\\.csv"))
 stopifnot(length(files) == 60)
 
 series_no <- as.numeric(stringr::str_extract(files, "(?<=series)\\d+"))
